@@ -63,7 +63,7 @@ public class SecondActivity extends AppCompatActivity implements SensorEventList
     public void onSensorChanged(SensorEvent sensorEvent) {
         txtX.setText(Float.toString(sensorEvent.values[0]));
         txtY.setText(Float.toString(sensorEvent.values[1]));
-        txtY.setText(Float.toString(sensorEvent.values[2]));
+        txtZ.setText(Float.toString(sensorEvent.values[2]));
 
         double acc_norm = Math.sqrt(sensorEvent.values[0]*sensorEvent.values[0]+
                 sensorEvent.values[1]*sensorEvent.values[1]+
