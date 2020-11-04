@@ -1,4 +1,4 @@
-# Human Activity Recognition from IMU data using Deep Learning (Tensorflow)
+# Human Activity Recognition from IMU data using Deep Learning with Tensorflow
 
 This folder contains the slides and the code corresponding to a tutorial presented as guest lecture in UCLA's ECE M202A / CS M213A course on how to process IMU sensor data using deep neural networks to detect human activities. The files were copied from https://github.com/vikranth94/Activity-Recognition.
 
