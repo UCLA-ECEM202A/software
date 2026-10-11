@@ -1,0 +1,127 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+HERE="$(cd "$(dirname "$0")" && pwd)"
+IMAGE=m202a-zephyr:4.4.2
+
+usage() {
+  cat <<'EOF'
+Usage: ./zephyr setup
+       ./zephyr apps
+       ./zephyr sim APP | sim-clean APP
+       ./zephyr build APP | build-usb APP
+       ./zephyr ports
+       ./zephyr flash APP /dev/cu.usbmodemXXXX
+       ./zephyr flash-usb APP /dev/cu.usbmodemXXXX
+
+Apps and supported targets are listed by ./zephyr apps.
+Builds use the pinned Linux container. Flashing uses host BOSSA on macOS.
+EOF
+}
+
+run_container() {
+  docker run --rm -v "$HERE:/work" -v m202a-zephyr-build:/build "$IMAGE" "$@"
+}
+
+lookup_app() {
+  local requested="$1" name native_sim nano_build nano_flash sim_run_test nano_build_test nano_run_test
+  [[ "$requested" =~ ^[a-z][a-z0-9-]*$ ]] || { echo "Invalid app name: $requested" >&2; exit 2; }
+  while IFS=, read -r name native_sim nano_build nano_flash sim_run_test nano_build_test nano_run_test; do
+    if [[ "$name" == "$requested" ]]; then
+      APP_SIM="$native_sim"
+      APP_BOARD="$nano_build"
+      APP_FLASH="$nano_flash"
+      return
+    fi
+  done < <(tail -n +2 "$HERE/apps.csv")
+  echo "Unknown app: $requested. Run ./zephyr apps." >&2
+  exit 2
+}
+
+need_app() {
+  [[ $# -ge 1 && -n "$1" ]] || { usage >&2; exit 2; }
+  APP="$1"
+  lookup_app "$APP"
+}
+
+ACTION="${1:-help}"
+case "$ACTION" in
+  setup)
+    docker build -t "$IMAGE" "$HERE"
+    ;;
+  apps)
+    cat "$HERE/apps.csv"
+    ;;
+  sim|sim-clean)
+    need_app "${2:-}"
+    [[ "$APP_SIM" == yes ]] || { echo "$APP does not support native_sim." >&2; exit 2; }
+    MODE=reuse
+    [[ "$ACTION" == sim-clean ]] && MODE=clean
+    run_container sh -ec '
+      if [ "$2" = clean ]; then
+        west build -p always -b native_sim/native/64 "/work/$1" -d "/build/sim-$1"
+      else
+        west build -b native_sim/native/64 "/work/$1" -d "/build/sim-$1"
+      fi
+      timeout 30 "/build/sim-$1/zephyr/zephyr.exe"
+    ' sh "$APP" "$MODE"
+    ;;
+  build|build-usb)
+    need_app "${2:-}"
+    [[ "$APP_BOARD" == yes ]] || { echo "$APP has no configured Nano build." >&2; exit 2; }
+    mkdir -p "$HERE/output"
+    SUFFIX=""
+    [[ "$ACTION" == build-usb ]] && SUFFIX="-usb"
+    run_container sh -ec '
+      overlays=/work/board/nano33-sense-rev2.overlay
+      if [ -f "/work/$1/app.overlay" ]; then
+        overlays="$overlays;/work/$1/app.overlay"
+      fi
+      if [ "$2" = -usb ]; then
+        west build -p always -S cdc-acm-console -b arduino_nano_33_ble/nrf52840/sense "/work/$1" -d "/build/board-$1-usb" -- "-DDTC_OVERLAY_FILE=$overlays"
+      else
+        west build -p always -b arduino_nano_33_ble/nrf52840/sense "/work/$1" -d "/build/board-$1" -- "-DDTC_OVERLAY_FILE=$overlays"
+      fi
+      cp "/build/board-$1$2/zephyr/zephyr.bin" "/work/output/$1$2.bin"
+      cp "/build/board-$1$2/zephyr/.config" "/work/output/$1$2.config"
+    ' sh "$APP" "$SUFFIX"
+    echo "Firmware: $HERE/output/$APP$SUFFIX.bin"
+    ;;
+  ports)
+    find /dev -maxdepth 1 -name 'cu.usb*' -print
+    ;;
+  flash|flash-usb)
+    need_app "${2:-}"
+    [[ "$APP_FLASH" == yes ]] || { echo "$APP is not configured for Nano flashing." >&2; exit 2; }
+    SUFFIX=""
+    [[ "$ACTION" == flash-usb ]] && SUFFIX="-usb"
+    PORT="${3:-}"
+    [[ "$PORT" == /dev/cu.usb* && -c "$PORT" ]] || {
+      echo 'Double-tap Nano RESET, run ./zephyr ports, then supply that bootloader port.' >&2
+      exit 2
+    }
+    [[ -x "$HERE/bin/bossac" ]] || { echo 'Run ./build-bossac-mac first.' >&2; exit 2; }
+    [[ -f "$HERE/output/$APP$SUFFIX.bin" && -f "$HERE/output/$APP$SUFFIX.config" ]] || {
+      echo "Run ./zephyr build${SUFFIX} $APP before flashing." >&2; exit 2;
+    }
+    grep -qx 'CONFIG_FLASH_LOAD_OFFSET=0x10000' "$HERE/output/$APP$SUFFIX.config" || {
+      echo 'Unexpected firmware link address; refusing to flash.' >&2; exit 2;
+    }
+    if [[ "$SUFFIX" == -usb ]]; then
+      grep -qx 'CONFIG_CDC_ACM_SERIAL_INITIALIZE_AT_BOOT=y' "$HERE/output/$APP$SUFFIX.config" || {
+        echo 'Firmware lacks the USB CDC console; refusing to flash-usb.' >&2; exit 2;
+      }
+    fi
+    echo "Flashing $APP to $PORT; this replaces the current application."
+    # The Arduino bootloader supplies the 0x10000 base; do not add a BOSSA offset.
+    "$HERE/bin/bossac" -p "$PORT" -R -w -v -b "$HERE/output/$APP$SUFFIX.bin"
+    ;;
+  help|-h|--help)
+    usage
+    ;;
+  *)
+    echo "Unknown action: $ACTION" >&2
+    usage >&2
+    exit 2
+    ;;
+esac

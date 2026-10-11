@@ -1,0 +1,8 @@
+name,native_sim,nano_build,nano_flash,sim_run_test,nano_build_test,nano_run_test
+smoke,yes,no,no,verified,not_applicable,not_applicable
+har,yes,no,no,verified,not_applicable,not_applicable
+blinky,no,yes,yes,not_applicable,verified,verified
+queue-demo,yes,yes,yes,verified,verified,verified
+light-event,no,yes,yes,not_applicable,verified,verified
+motion-event,no,yes,yes,not_applicable,verified,verified
+acoustic-event,no,yes,yes,not_applicable,verified,verified

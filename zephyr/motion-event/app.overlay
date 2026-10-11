@@ -1,0 +1,2 @@
+/* The shared course Rev2 overlay describes the BMI270; this app enables it. */
+&bmi270 { status = "okay"; };
