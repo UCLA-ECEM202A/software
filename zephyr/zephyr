@@ -50,7 +50,39 @@ case "$ACTION" in
     docker build -t "$IMAGE" "$HERE"
     ;;
   apps)
-    cat "$HERE/apps.csv"
+    awk -F, '
+      BEGIN {
+        header[1] = "App"; header[2] = "Sim"; header[3] = "Nano build"
+        header[4] = "Flash"; header[5] = "Sim run"
+        header[6] = "Build test"; header[7] = "Board run"
+        for (i = 1; i <= 7; i++) width[i] = length(header[i])
+      }
+      NR == 1 { next }
+      {
+        rows++
+        for (i = 1; i <= 7; i++) {
+          value = ($i == "not_applicable" ? "n/a" : $i)
+          cell[rows, i] = value
+          if (length(value) > width[i]) width[i] = length(value)
+        }
+      }
+      END {
+        for (row = 0; row <= rows; row++) {
+          for (i = 1; i <= 7; i++) {
+            value = (row == 0 ? header[i] : cell[row, i])
+            if (i < 7) printf "%-*s  ", width[i], value
+            else print value
+          }
+          if (row == 0) {
+            for (i = 1; i <= 7; i++) {
+              line = sprintf("%*s", width[i], "")
+              gsub(/ /, "-", line)
+              printf "%s%s", line, (i < 7 ? "  " : "\n")
+            }
+          }
+        }
+      }
+    ' "$HERE/apps.csv"
     ;;
   sim|sim-clean)
     need_app "${2:-}"

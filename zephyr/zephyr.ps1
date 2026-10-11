@@ -33,7 +33,17 @@ switch ($Action) {
         & docker build -t $Image $ProjectDir
         if ($LASTEXITCODE -ne 0) { throw 'Image build failed.' }
     }
-    'apps' { Import-Csv -LiteralPath (Join-Path $ProjectDir 'apps.csv') | Format-Table -AutoSize }
+    'apps' {
+        Import-Csv -LiteralPath (Join-Path $ProjectDir 'apps.csv') |
+            Select-Object @{Name='App';Expression={$_.name}},
+                          @{Name='Sim';Expression={$_.native_sim}},
+                          @{Name='Nano build';Expression={$_.nano_build}},
+                          @{Name='Flash';Expression={$_.nano_flash}},
+                          @{Name='Sim run';Expression={if ($_.sim_run_test -eq 'not_applicable') {'n/a'} else {$_.sim_run_test}}},
+                          @{Name='Build test';Expression={if ($_.nano_build_test -eq 'not_applicable') {'n/a'} else {$_.nano_build_test}}},
+                          @{Name='Board run';Expression={if ($_.nano_run_test -eq 'not_applicable') {'n/a'} else {$_.nano_run_test}}} |
+            Format-Table -AutoSize
+    }
     'sim' { Invoke-Sim 'reuse' }
     'sim-clean' { Invoke-Sim 'clean' }
     { $_ -in 'build','build-usb' } {
