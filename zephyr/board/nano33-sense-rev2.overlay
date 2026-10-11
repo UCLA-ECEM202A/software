@@ -1,0 +1,22 @@
+/* Course overlay for Sense Rev2 with the pinned Zephyr 4.4.2 Rev1 board target.
+ * Keep board identity here; apps opt into individual sensors as needed.
+ * SPDX-License-Identifier: Apache-2.0
+ */
+
+&lsm9ds1 { status = "disabled"; };
+&lsm9ds1_mag { status = "disabled"; };
+&hts221 { status = "disabled"; };
+
+&i2c1 {
+	bmi270: bmi270@68 {
+		compatible = "bosch,bmi270";
+		reg = <0x68>;
+		status = "disabled";
+	};
+};
+
+/ {
+	aliases {
+		accel0 = &bmi270;
+	};
+};

@@ -1,0 +1,16 @@
+#!/usr/bin/env bash
+set -euo pipefail
+HERE="$(cd "$(dirname "$0")" && pwd)"
+ARCH="$(uname -m)"
+test "$(uname -s)" = Darwin || { echo 'This script builds the macOS flashing utility.'; exit 2; }
+SRC="$(mktemp -d /tmp/m202a-bossa.XXXXXX)"
+git clone https://github.com/arduino/BOSSA.git "$SRC"
+git -C "$SRC" checkout 37600d1635f830cc0cdf7c56e586a021272c4e35
+make -C "$SRC" -j4 bossac \
+  COMMON_CXXFLAGS="-arch $ARCH -std=c++11 "'-DVERSION=\"1.9.1-arduino2-native\"' \
+  COMMON_LDFLAGS="-arch $ARCH"
+mkdir -p "$HERE/bin"
+cp "$SRC/bin/bossac" "$HERE/bin/bossac"
+cp "$SRC/LICENSE" "$HERE/bin/BOSSA-LICENSE"
+"$HERE/bin/bossac" --version
+echo "Source retained at $SRC"
