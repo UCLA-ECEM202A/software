@@ -41,6 +41,7 @@ Open a terminal **in this folder**. Start Docker Desktop or OrbStack. On macOS u
 | List serial ports | `./zephyr ports` | `.\zephyr.ps1 ports` |
 | Flash Nano firmware | `./zephyr flash blinky /dev/cu.usbmodemXXXX` | `.\zephyr.ps1 flash blinky COM5` |
 | Flash USB-console firmware | `./zephyr flash-usb queue-demo /dev/cu.usbmodemXXXX` | `.\zephyr.ps1 flash-usb queue-demo COM5` |
+| Reflash a running USB-console app without pressing RESET | `./zephyr flash-usb-auto queue-demo` | `.\zephyr.ps1 flash-usb-auto queue-demo` |
 
 For PowerShell, if script execution is disabled, run it with an appropriate per-session policy or invoke it from a PowerShell session where local scripts are allowed. The instructor's macOS launch and build paths are tested. Students have successfully used the **older distributed PowerShell package on Windows**; the **new action-plus-app PowerShell launcher** in this folder has not yet been run on Windows. A short Windows check of `apps`, `sim smoke`, `sim queue-demo`, and `build blinky` is appropriate before replacing the working student package. USB flashing remains host-side.
 
@@ -62,6 +63,20 @@ On **macOS**, open the application port with `screen /dev/cu.usbmodemXXXX 115200
 On **Windows PowerShell**, open the application port with `.\serial-monitor.ps1 COM6` (substitute the port shown by `.\zephyr.ps1 ports`). This small included monitor uses Windows' built-in .NET serial API, sets DTR, and exits with Control-C. If local PowerShell scripts are blocked, use the same per-session execution-policy setting that allowed the course's existing `zephyr.ps1`, or run the scripts from a permitted PowerShell session. If the port changes or is busy, close other serial monitors and check Device Manager under **Ports (COM & LPT)**.
 
 The upload port and application port are different USB modes even if the operating system happens to assign the same name. If the application is not running or the USB console fails to enumerate, double-tap RESET to recover the bootloader and flash the known working `blinky` image. The instructor has verified the USB-console queue trace on the Nano with macOS; the revised PowerShell build/flash/monitor path still awaits a Windows test.
+
+## Automatic reflash after the first USB-console upload
+
+`build-usb` now includes an Arduino-compatible 1200-baud upload trigger. After the **first** USB-console image has been loaded using the manual bootloader procedure above, later USB-console images can be loaded without touching RESET. Close the serial monitor, find the *running application's* port with `ports`, and run `flash-usb-auto APP`. If more than one serial port is present, supply `APPLICATION_PORT` explicitly. For example:
+
+```text
+./zephyr build-usb motion-event
+./zephyr ports
+./zephyr flash-usb-auto motion-event
+```
+
+On Windows, use `.\zephyr.ps1 build-usb motion-event`, `.\zephyr.ps1 ports`, and `.\zephyr.ps1 flash-usb-auto motion-event`. If more than one serial port is present, append the application port shown on your computer, such as `/dev/cu.usbmodemXXXX` or `COM5`; do not supply the bootloader port to `flash-usb-auto`. The command briefly opens that port at 1200 baud, waits for the Nano's bootloader port, uploads the new image, verifies it, and restarts the board. Then find the new application port and run or monitor the app. You can repeat this build–load–run cycle with another USB-console app. The port name may change after every reset.
+
+The installed app must itself contain the 1200-baud trigger, so a board still running an older image needs one manual double-tap and `flash-usb` first. A plain `build` image has no USB-console trigger. If automatic entry times out, close any serial monitor, double-tap RESET, and use `flash-usb APP BOOTLOADER_PORT`. On October 11, 2026, the macOS path was verified on the instructor's Nano: a 1200-baud request entered the bootloader without a button press, BOSSA verified a queue-demo reflash, the queue demo ran to `M202A QUEUE DEMO PASS`, and a subsequent automatic switch to `light-event` uploaded and started. The PowerShell path still awaits a Windows check.
 
 ## Board build and flash
 

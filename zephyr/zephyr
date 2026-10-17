@@ -13,6 +13,7 @@ Usage: ./zephyr setup
        ./zephyr ports
        ./zephyr flash APP /dev/cu.usbmodemXXXX
        ./zephyr flash-usb APP /dev/cu.usbmodemXXXX
+       ./zephyr flash-usb-auto APP [APPLICATION_PORT]
 
 Apps and supported targets are listed by ./zephyr apps.
 Builds use the pinned Linux container. Flashing uses host BOSSA on macOS.
@@ -21,6 +22,42 @@ EOF
 
 run_container() {
   docker run --rm -v "$HERE:/work" -v m202a-zephyr-build:/build "$IMAGE" "$@"
+}
+
+# The input is the *running application's* USB port. A 1200-baud touch asks
+# USB-console firmware to reset into the Arduino bootloader. Detect the new
+# bootloader port rather than assuming its macOS device name remains the same.
+auto_bootloader_port() {
+  local app_port="$1" before current candidate seen_disappearance=0 i
+  [[ "$app_port" == /dev/cu.usbmodem* && -c "$app_port" ]] || {
+    echo "Application USB port not found: $app_port" >&2
+    return 2
+  }
+  before="$(find /dev -maxdepth 1 -name 'cu.usbmodem*' -print)"
+  echo "Requesting bootloader via $app_port (1200 baud); close screen first." >&2
+  stty -f "$app_port" 1200 || {
+    echo 'Could not open the application port. Close the serial monitor and retry.' >&2
+    return 2
+  }
+  for ((i = 0; i < 80; i++)); do
+    sleep 0.1
+    current="$(find /dev -maxdepth 1 -name 'cu.usbmodem*' -print)"
+    [[ -c "$app_port" ]] || seen_disappearance=1
+    for candidate in $current; do
+      if [[ "$seen_disappearance" == 1 ]] &&
+         ! printf '%s\n' "$before" | grep -Fxq "$candidate"; then
+        sleep 0.3
+        [[ -c "$candidate" ]] && { printf '%s\n' "$candidate"; return 0; }
+      fi
+    done
+    if [[ "$seen_disappearance" == 1 && -c "$app_port" ]]; then
+      sleep 0.3
+      printf '%s\n' "$app_port"
+      return 0
+    fi
+  done
+  echo 'Bootloader port did not appear. Double-tap RESET and use flash-usb with the bootloader port.' >&2
+  return 2
 }
 
 lookup_app() {
@@ -110,7 +147,7 @@ case "$ACTION" in
         overlays="$overlays;/work/$1/app.overlay"
       fi
       if [ "$2" = -usb ]; then
-        west build -p always -S cdc-acm-console -b arduino_nano_33_ble/nrf52840/sense "/work/$1" -d "/build/board-$1-usb" -- "-DDTC_OVERLAY_FILE=$overlays"
+        west build -p always -S cdc-acm-console -b arduino_nano_33_ble/nrf52840/sense "/work/$1" -d "/build/board-$1-usb" -- "-DDTC_OVERLAY_FILE=$overlays" -DCONFIG_REBOOT=y
       else
         west build -p always -b arduino_nano_33_ble/nrf52840/sense "/work/$1" -d "/build/board-$1" -- "-DDTC_OVERLAY_FILE=$overlays"
       fi
@@ -122,16 +159,30 @@ case "$ACTION" in
   ports)
     find /dev -maxdepth 1 -name 'cu.usb*' -print
     ;;
-  flash|flash-usb)
+  flash|flash-usb|flash-usb-auto)
     need_app "${2:-}"
     [[ "$APP_FLASH" == yes ]] || { echo "$APP is not configured for Nano flashing." >&2; exit 2; }
     SUFFIX=""
-    [[ "$ACTION" == flash-usb ]] && SUFFIX="-usb"
+    [[ "$ACTION" == flash-usb || "$ACTION" == flash-usb-auto ]] && SUFFIX="-usb"
     PORT="${3:-}"
-    [[ "$PORT" == /dev/cu.usb* && -c "$PORT" ]] || {
-      echo 'Double-tap Nano RESET, run ./zephyr ports, then supply that bootloader port.' >&2
-      exit 2
-    }
+    if [[ "$ACTION" == flash-usb-auto ]]; then
+      if [[ -z "$PORT" ]]; then
+        PORT="$(find /dev -maxdepth 1 -name 'cu.usbmodem*' -print)"
+        [[ "$PORT" != *$'\n'* ]] || {
+          echo 'More than one USB modem port found; supply the application port explicitly.' >&2
+          exit 2
+        }
+      fi
+      [[ "$PORT" == /dev/cu.usbmodem* && -c "$PORT" ]] || {
+        echo 'Supply the running application USB port shown by ./zephyr ports.' >&2
+        exit 2
+      }
+    else
+      [[ "$PORT" == /dev/cu.usb* && -c "$PORT" ]] || {
+        echo 'Double-tap Nano RESET, run ./zephyr ports, then supply that bootloader port.' >&2
+        exit 2
+      }
+    fi
     [[ -x "$HERE/bin/bossac" ]] || { echo 'Run ./build-bossac-mac first.' >&2; exit 2; }
     [[ -f "$HERE/output/$APP$SUFFIX.bin" && -f "$HERE/output/$APP$SUFFIX.config" ]] || {
       echo "Run ./zephyr build${SUFFIX} $APP before flashing." >&2; exit 2;
@@ -143,6 +194,12 @@ case "$ACTION" in
       grep -qx 'CONFIG_CDC_ACM_SERIAL_INITIALIZE_AT_BOOT=y' "$HERE/output/$APP$SUFFIX.config" || {
         echo 'Firmware lacks the USB CDC console; refusing to flash-usb.' >&2; exit 2;
       }
+    fi
+    if [[ "$ACTION" == flash-usb-auto ]]; then
+      grep -qx 'CONFIG_REBOOT=y' "$HERE/output/$APP-usb.config" || {
+        echo 'Rebuild with ./zephyr build-usb APP before automatic flashing.' >&2; exit 2;
+      }
+      PORT="$(auto_bootloader_port "$PORT")"
     fi
     echo "Flashing $APP to $PORT; this replaces the current application."
     # The Arduino bootloader supplies the 0x10000 base; do not add a BOSSA offset.
